@@ -1,0 +1,5 @@
+# Build artefacts (regenerable via `make`)
+*.o
+*.dylib
+*.deb
+_package/

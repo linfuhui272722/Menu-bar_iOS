@@ -1,0 +1,13 @@
+Package: com.linfunui.macbar
+Name: MacBar
+Version: 1.0.0
+Architecture: @ARCH@
+Description: Ports the macOS desktop menu bar to iPadOS.
+ Ported from OS X El Capitan SystemUIServer / Menu Extras / AppKit:
+ a top menu bar with left application menus and right status items
+ (clock, battery, wifi, volume, rotation lock). Rootless (/var/jb).
+ Maintainer: linfuhui272722
+Author: linfuhui272722
+Section: Tweaks
+Depends: ellekit, firmware (>= 15.0)
+Maintainer: linfuhui272722 <linfuhui272722@users.noreply.github.com>

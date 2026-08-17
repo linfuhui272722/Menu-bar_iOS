@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<array>
+    <dict>
+        <key>id</key>
+        <integer>-10020</integer>
+        <key>class</key>
+        <string>MBRotationLockExtra</string>
+        <key>bundle</key>
+        <string>com.apple.menuextra.rotationlock</string>
+        <key>width</key>
+        <real>22</real>
+    </dict>
+    <dict>
+        <key>id</key>
+        <integer>-10004</integer>
+        <key>class</key>
+        <string>AirPortExtra</string>
+        <key>bundle</key>
+        <string>com.apple.menuextra.airport</string>
+        <key>width</key>
+        <real>22</real>
+    </dict>
+    <dict>
+        <key>id</key>
+        <integer>-10003</integer>
+        <key>class</key>
+        <string>AppleVolumeExtra</string>
+        <key>bundle</key>
+        <string>com.apple.menuextra.volume</string>
+        <key>width</key>
+        <real>25</real>
+    </dict>
+    <dict>
+        <key>id</key>
+        <integer>-10001</integer>
+        <key>class</key>
+        <string>BatteryExtra</string>
+        <key>bundle</key>
+        <string>com.apple.menuextra.battery</string>
+        <key>width</key>
+        <real>40</real>
+    </dict>
+    <dict>
+        <key>id</key>
+        <integer>-10000</integer>
+        <key>class</key>
+        <string>AppleClockExtra</string>
+        <key>bundle</key>
+        <string>com.apple.menuextra.clock</string>
+        <key>width</key>
+        <real>140</real>
+    </dict>
+</array>
+</plist>
