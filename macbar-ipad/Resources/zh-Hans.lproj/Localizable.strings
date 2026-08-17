@@ -1,0 +1,24 @@
+/* MacBar — 简体中文 */
+"About This iPad" = "关于本机";
+"System Settings…" = "系统设置…";
+"App Store…" = "App Store…";
+"Sleep" = "睡眠";
+"Restart…" = "重新启动…";
+"Shut Down…" = "关机…";
+"Lock Screen" = "锁定屏幕";
+"Log Out…" = "退出登录…";
+"Hide %@" = "隐藏 %@";
+"Hide Others" = "隐藏其他";
+"Show All" = "全部显示";
+"Quit %@" = "退出 %@";
+"About %@" = "关于 %@";
+"Turn Wi-Fi Off" = "关闭 Wi-Fi";
+"Turn Wi-Fi On" = "打开 Wi-Fi";
+"Open Network Preferences…" = "打开网络设置…";
+"Mute" = "静音";
+"Open Sound Preferences…" = "打开声音设置…";
+"Show Percentage" = "显示百分比";
+"Open Energy Saver…" = "打开节能设置…";
+"Date & Time Preferences…" = "日期与时间设置…";
+"Lock Rotation" = "锁定屏幕旋转";
+"Unlock Rotation" = "解锁屏幕旋转";
