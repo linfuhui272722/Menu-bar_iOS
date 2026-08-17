@@ -2,10 +2,10 @@
 #import "MBMenuBarWindow.h"
 #import "MBMenuBarView.h"
 #import "MBTheme.h"
+#import "MBLog.h"
 
 @interface MBMenuBarWindow ()
 @property (nonatomic, strong) MBMenuBarView *bar;
-@property (nonatomic, assign) BOOL installed;
 @property (nonatomic, assign) BOOL visible;
 @end
 
@@ -18,32 +18,50 @@
 }
 
 - (instancetype)init {
-    UIWindow *host = [UIApplication sharedApplication].windows.firstObject;
-    UIEdgeInsets sf = host.safeAreaInsets;
+    // On multi-scene iOS the keyWindow may not be the first object; scan for
+    // a window with non-zero bounds, fall back to the main screen bounds.
+    UIWindow *host = nil;
+    for (UIWindow *w in [UIApplication sharedApplication].windows) {
+        if (CGRectGetWidth(w.bounds) > 10) { host = w; break; }
+    }
+    CGRect screenBounds = [UIScreen mainScreen].bounds;
+    CGRect hostBounds = host ? host.bounds : screenBounds;
+    UIEdgeInsets sf = host ? host.safeAreaInsets : UIEdgeInsetsZero;
     CGFloat top = sf.top > 0 ? sf.top : 20.0f;
-    CGRect frame = CGRectMake(0, top, host.bounds.size.width, MBMenuBarHeight());
-    if ((self = [super initWithFrame:host.bounds])) {
+    CGRect barFrame = CGRectMake(0, top, screenBounds.size.width, MBMenuBarHeight());
+    MBLog(@"MBMenuBarWindow.init: host=%@ hostBounds=%@ top=%g barHeight=%g",
+          host ? NSStringFromClass([host class]) : @"nil",
+          NSStringFromCGRect(hostBounds), top, (CGFloat)MBMenuBarHeight());
+    if ((self = [super initWithFrame:barFrame])) {
         self.windowLevel = UIWindowLevelStatusBar + 1;
         self.backgroundColor = UIColor.clearColor;
+        self.userInteractionEnabled = YES;
         self.hidden = YES;
         _bar = [MBMenuBarView sharedBar];
-        _bar.frame = frame;
+        _bar.frame = self.bounds;
         [self addSubview:_bar];
+        MBLog(@"MBMenuBarWindow.init: window frame=%@ windowLevel=%g bar=%@",
+              NSStringFromCGRect(self.frame), (CGFloat)self.windowLevel,
+              NSStringFromClass([_bar class]));
     }
     return self;
 }
 
-- (void)installInHost:(UIWindow *)host {
-    if (_installed) return;
-    [host addSubview:self];
-    _installed = YES;
-}
-
-- (void)show {
+// Independent UIWindow: just unhide it. Do NOT nest a UIWindow as a subview
+// of another UIWindow — that does not render on iOS.
+- (void)makeVisible {
     self.hidden = NO;
     _visible = YES;
     [_bar reloadStatusItems];
+    MBLog(@"MBMenuBarWindow.makeVisible: hidden=%d frame=%@ subviews=%lu",
+          (int)self.hidden, NSStringFromCGRect(self.frame),
+          (unsigned long)self.subviews.count);
 }
+
+// Back-compat with older callers (installInHost is now a no-op; the window
+// shows itself). Kept so existing call sites keep compiling.
+- (void)installInHost:(UIWindow *)host { (void)host; }
+- (void)show { [self makeVisible]; }
 
 - (void)hide {
     self.hidden = YES;

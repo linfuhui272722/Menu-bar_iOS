@@ -10,6 +10,7 @@
 #import "MBMenuExtraLoader.h"
 #import "MBCore.h"
 #import "MBTheme.h"
+#import "MBLog.h"
 
 // Ported extras (their macOS NSPrincipalClass names):
 #import "Extras/AppleClockExtra.h"
@@ -90,19 +91,28 @@
         path = @"/var/jb/Library/MobileSubstrate/DynamicLibraries/MacBar.bundle/Autoload.plist";
     }
     NSArray *autoload = [NSArray arrayWithContentsOfFile:path];
+    MBLog(@"loadAutoloadedExtras: path=%@ entries=%lu",
+          path ?: @"nil", (unsigned long)(autoload ? autoload.count : 0));
+    if (!autoload) return;
+    NSUInteger loaded = 0;
     for (NSDictionary *e in autoload) {
         NSString *mPath = e[@"path"];
         NSString *base = mPath.lastPathComponent;
         id mapped = _classMap[base];
         Class cls = [mapped isKindOfClass:[NSNull class]] ? Nil : (Class)mapped;
         NSString *selName = e[@"method"];
-        if (![self performCanLoadSelector:selName]) continue;
+        BOOL canLoad = [self performCanLoadSelector:selName];
+        MBLog(@"loadAutoloadedExtras: entry=%@ canLoad=%d cls=%@",
+              base, (int)canLoad, cls ? NSStringFromClass(cls) : @"nil");
+        if (!canLoad) continue;
         if (!cls) continue;
         // NSMenuExtraWidth is normally in each .menu's Info.plist; the ported
         // subclasses hard-code their own width (clock=140, volume=25...).
         NSStatusItem *item = [self addMenuExtraOfClass:cls width:NSVariableStatusItemLength];
-        if (item) [_items addObject:item];
+        if (item) { [_items addObject:item]; loaded++; }
     }
+    MBLog(@"loadAutoloadedExtras: loaded %lu extras, total items=%lu",
+          (unsigned long)loaded, (unsigned long)_items.count);
 }
 
 - (NSStatusItem *)addMenuExtraOfClass:(Class)cls width:(CGFloat)width {

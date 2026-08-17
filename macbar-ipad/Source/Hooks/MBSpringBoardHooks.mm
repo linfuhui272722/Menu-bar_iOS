@@ -10,7 +10,9 @@
 #import "MBMenuBarView.h"
 #import "MBMenuExtraLoader.h"
 #import "MBPrivateDecls.h"
+#import "MBLog.h"
 #import <objc/runtime.h>
+#import <dlfcn.h>
 
 // ElleKit hook primitive (resolved at load time on device; weakly referenced
 // here so the link succeeds in a cross-compile environment without libsubstrate).
@@ -25,6 +27,7 @@ static NSString *const kSBFrontmostChangedNotification = @"SBFrontmostApplicatio
 @implementation MBSpringBoardHooks
 
 + (void)load {
+    MBLog(@"MacBar +load (pid=%d)", getpid());
     // Defer real setup to the first SpringBoard runloop tick.
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(_appStateChanged:)
@@ -41,7 +44,12 @@ static NSString *const kSBFrontmostChangedNotification = @"SBFrontmostApplicatio
 // Install the menu bar: find the host window, create the menu bar window,
 // attach it, show it, and load the Menu Extras. Safe to call repeatedly.
 + (void)installMenuBarNow {
-    UIWindow *host = [UIApplication sharedApplication].windows.firstObject;
+    UIApplication *app = [UIApplication sharedApplication];
+    UIWindow *host = app.windows.firstObject;
+    MBLog(@"installMenuBarNow: app=%@ host=%@ hostBounds=%@",
+          app ? NSStringFromClass([app class]) : @"nil",
+          host ? NSStringFromClass([host class]) : @"nil",
+          host ? NSStringFromCGRect(host.bounds) : @"nil");
     if (!host || host.bounds.size.width < 10.0f) {
         // Too early (SpringBoard still launching) — retry shortly.
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)),
@@ -51,9 +59,10 @@ static NSString *const kSBFrontmostChangedNotification = @"SBFrontmostApplicatio
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         MBMenuBarWindow *w = [MBMenuBarWindow sharedWindow];
-        [w installInHost:host];
-        [w show];
+        [w makeVisible];           // independent UIWindow, just show it
         [[MBMenuExtraLoader sharedLoader] loadAutoloadedExtras];
+        MBLog(@"installMenuBarNow: bar installed, window=%@ hidden=%d frame=%@",
+              NSStringFromClass([w class]), (int)w.hidden, NSStringFromCGRect(w.frame));
     });
 }
 @end
@@ -82,8 +91,14 @@ static void hook_SBAppDelegate_didFinishLaunching(id self, SEL _cmd, id app) {
     });
 }
 
+// Install ElleKit hooks only. MUST NOT be responsible for installing the bar:
+// if MSHookMessageEx is unavailable we still want the bar to show.
 static void _installHooks(void) {
-    if (!MSHookMessageEx) return;  // ElleKit not loaded — nothing to do
+    if (!MSHookMessageEx) {
+        MBLog(@"_installHooks: MSHookMessageEx unavailable (ElleKit not loaded?) — bar will still be installed from ctor");
+        return;
+    }
+    MBLog(@"_installHooks: MSHookMessageEx=%p", (void *)MSHookMessageEx);
 
     // Only hook methods that actually exist on the class; hooking a
     // non-existent selector makes MSHookMessageEx add the method and leaves
@@ -93,6 +108,11 @@ static void _installHooks(void) {
         MSHookMessageEx(mw, @selector(applicationDidActivate:),
                         (IMP)hook_SBMainWorkspace_applicationDidActivate,
                         (IMP *)&orig_SBMainWorkspace_applicationDidActivate);
+        MBLog(@"_installHooks: hooked SBMainWorkspace -applicationDidActivate:");
+    } else {
+        MBLog(@"_installHooks: SBMainWorkspace=%@ hasApplicationDidActivate=%d",
+              mw ? NSStringFromClass(mw) : @"nil",
+              mw ? (class_getInstanceMethod(mw, @selector(applicationDidActivate:)) != nil) : 0);
     }
     // SpringBoard's principal delegate class is SBAppDelegate; fall back to
     // SBApplication (the UIApplication subclass SpringBoard uses). Hooking
@@ -104,16 +124,18 @@ static void _installHooks(void) {
         MSHookMessageEx(sbAd, @selector(applicationDidFinishLaunching:),
                         (IMP)hook_SBAppDelegate_didFinishLaunching,
                         (IMP *)&orig_SBAppDelegate_didFinishLaunching);
+        MBLog(@"_installHooks: hooked %@ -applicationDidFinishLaunching:", NSStringFromClass(sbAd));
+    } else {
+        MBLog(@"_installHooks: no launch hook target (sbAd=%@)", sbAd ? NSStringFromClass(sbAd) : @"nil");
     }
-
-    // Always try to install the bar directly. The launch hook above may never
-    // fire (installed after launch already ran), so don't depend on it.
-    [MBSpringBoardHooks installMenuBarNow];
 }
 
 // MobileSubstrate constructor — runs at load time, the Theos %ctor equivalent.
 __attribute__((constructor)) static void MacBarCtor(void) {
-    // Also boot on apps that aren't SBAppDelegate (e.g. when injected into a
-    // hosted app); the host window installs from the bar's own +load observer.
+    MBLog(@"MacBarCtor: dylib loaded (pid=%d)", getpid());
+    // Boot on any host: schedule the bar install directly on the main queue
+    // (independent of ElleKit/MSHookMessageEx availability).
+    dispatch_async(dispatch_get_main_queue(), ^{ [MBSpringBoardHooks installMenuBarNow]; });
+    // Separately install the runtime hooks (frontmost-app refresh).
     dispatch_async(dispatch_get_main_queue(), ^{ _installHooks(); });
 }

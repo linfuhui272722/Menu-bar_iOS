@@ -4,6 +4,7 @@
 #import "MBMenuWindow.h"
 #import "MBAppMenuController.h"
 #import "MBMenuExtraLoader.h"
+#import "MBLog.h"
 
 @interface MBMenuBarView ()
 @property (nonatomic, strong) UIButton *appleMenuButton;
@@ -37,6 +38,10 @@
         [self _setupLeft];
         [self _setupRight];
         [self _observe];
+        MBLog(@"MBMenuBarView.init: frame=%@ bg=%@ subviews=%lu",
+              NSStringFromCGRect(self.frame),
+              NSStringFromClass([[self backgroundColor] class]),
+              (unsigned long)self.subviews.count);
     }
     return self;
 }
@@ -102,12 +107,14 @@
 - (void)_itemsChanged { [self reloadStatusItems]; }
 
 - (void)reloadStatusItems {
+    NSUInteger before = _rightContainer.subviews.count;
     for (UIView *v in _rightContainer.subviews) [v removeFromSuperview];
     NSStatusBar *sb = [NSStatusBar systemStatusBar];
     NSArray *all = [sb valueForKey:@"itemArray"] ?: @[];
     _items = [all mutableCopy];
     // Lay out right-to-left.
     CGFloat x = _rightContainer.bounds.size.width;
+    NSUInteger placed = 0;
     for (NSStatusItem *it in [_items reverseObjectEnumerator]) {
         UIView *v = it.view ?: it.button;
         if (!v) continue;
@@ -117,7 +124,11 @@
         v.frame = CGRectMake(x - w, 0, w, MBMenuBarHeight());
         [_rightContainer addSubview:v];
         x -= w;
+        placed++;
     }
+    MBLog(@"reloadStatusItems: sbItems=%lu placed=%lu rightBefore=%lu rightAfter=%lu",
+          (unsigned long)all.count, (unsigned long)placed, (unsigned long)before,
+          (unsigned long)_rightContainer.subviews.count);
 }
 
 - (void)updateFrontmostApplication:(NSString *)bundleID displayName:(NSString *)name icon:(UIImage *)icon {
