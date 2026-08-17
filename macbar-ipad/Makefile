@@ -34,8 +34,12 @@ LDFLAGS    = $(TARGET) $(SYSROOT) -fuse-ld=$(LD) -framework UIKit -framework Fou
 
 NAME       = MacBar
 PREFIX     = /var/jb
-LIBDIR     = $(PREFIX)/Library/MobileSubstrate/DynamicLibraries
-BUNDLEDIR  = $(PREFIX)/Library/MobileSubstrate/DynamicLibraries
+# ElleKit's injector (libinjector/TweakLoader) scans ONLY this directory for
+# rootless tweaks (see ellekit injector.c: TWEAKS_DIRECTORY_ROOTLESS).
+# The classic /var/jb/Library/MobileSubstrate/DynamicLibraries path is NOT
+# scanned by ElleKit, so installing there results in the tweak never loading.
+LIBDIR     = $(PREFIX)/usr/lib/TweakInject
+BUNDLEDIR  = $(PREFIX)/usr/lib/TweakInject
 
 SRCS_C = \
 	Source/MBCore.mm \
@@ -92,10 +96,10 @@ package: $(NAME).dylib
 	cp Resources/en.lproj/Localizable.strings _package/$(BUNDLEDIR)/MacBar.bundle/en.lproj/
 	cp Resources/zh-Hans.lproj/Localizable.strings _package/$(BUNDLEDIR)/MacBar.bundle/zh-Hans.lproj/
 	@chmod 0755 _package/DEBIAN
-	@printf '#!/bin/sh\nexit 0\n' > _package/DEBIAN/preinst; chmod 0755 _package/DEBIAN/preinst
-	@printf '#!/bin/sh\n# Let the installer (Sileo/Zebra) handle the respring; doing it here\n# with killall can abort dpkg configuration mid-way.\nexit 0\n' > _package/DEBIAN/postinst; chmod 0755 _package/DEBIAN/postinst
-	@printf '#!/bin/sh\nexit 0\n' > _package/DEBIAN/prerm; chmod 0755 _package/DEBIAN/prerm
-	@printf '#!/bin/sh\nexit 0\n' > _package/DEBIAN/postrm; chmod 0755 _package/DEBIAN/postrm
+	cp postinst _package/DEBIAN/postinst; chmod 0755 _package/DEBIAN/postinst
+	cp prerm _package/DEBIAN/prerm; chmod 0755 _package/DEBIAN/prerm
+	cp preinst _package/DEBIAN/preinst; chmod 0755 _package/DEBIAN/preinst
+	cp postrm _package/DEBIAN/postrm; chmod 0755 _package/DEBIAN/postrm
 	sed -e 's/@ARCH@/iphoneos-arm64/' control_rootless > _package/DEBIAN/control
 	@dpkg-deb -Zxz --root-owner-group -b _package $(NAME)_1.0.0_rootless.deb
 	@echo "Built: $(NAME)_1.0.0_rootless.deb"

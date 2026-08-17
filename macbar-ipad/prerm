@@ -1,0 +1,11 @@
+#!/bin/sh
+# MacBar prerm — remove the compat symlinks we created in postinst.
+MSDIR=/var/jb/Library/MobileSubstrate/DynamicLibraries
+if [ -d "$MSDIR" ]; then
+  for f in MacBar.dylib MacBar.plist MacBar.bundle; do
+    if [ -L "$MSDIR/$f" ]; then
+      rm -f "$MSDIR/$f" 2>/dev/null || true
+    fi
+  done
+fi
+exit 0

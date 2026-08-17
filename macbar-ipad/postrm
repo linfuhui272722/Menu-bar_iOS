@@ -1,0 +1,3 @@
+#!/bin/sh
+# MacBar postrm — nothing extra to do.
+exit 0
