@@ -38,6 +38,24 @@ static NSString *const kSBFrontmostChangedNotification = @"SBFrontmostApplicatio
     [[MBMenuBarView sharedBar] updateFrontmostApplication:bid displayName:name icon:icon];
 }
 
+// Install the menu bar: find the host window, create the menu bar window,
+// attach it, show it, and load the Menu Extras. Safe to call repeatedly.
++ (void)installMenuBarNow {
+    UIWindow *host = [UIApplication sharedApplication].windows.firstObject;
+    if (!host || host.bounds.size.width < 10.0f) {
+        // Too early (SpringBoard still launching) — retry shortly.
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{ [self installMenuBarNow]; });
+        return;
+    }
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        MBMenuBarWindow *w = [MBMenuBarWindow sharedWindow];
+        [w installInHost:host];
+        [w show];
+        [[MBMenuExtraLoader sharedLoader] loadAutoloadedExtras];
+    });
+}
 @end
 
 // ---- hooks via MSHookMessageEx (parity with Theos %hook) ----
@@ -52,18 +70,15 @@ static void hook_SBMainWorkspace_applicationDidActivate(id self, SEL _cmd, id ap
     [[MBMenuBarView sharedBar] updateFrontmostApplication:bid displayName:name icon:nil];
 }
 
-// SpringBoard -applicationDidFinishLaunching: → install the menu bar.
+// SpringBoard -applicationDidFinishLaunching: → install the menu bar (if it
+// fires; on some iOS versions the hook is installed after launch has run, so
+// _installHooks also installs the bar directly — this is just a bonus path).
 static void (*orig_SBAppDelegate_didFinishLaunching)(id, SEL, id);
 static void hook_SBAppDelegate_didFinishLaunching(id self, SEL _cmd, id app) {
     if (orig_SBAppDelegate_didFinishLaunching)
         orig_SBAppDelegate_didFinishLaunching(self, _cmd, app);
     dispatch_async(dispatch_get_main_queue(), ^{
-        UIWindow *host = [UIApplication sharedApplication].windows.firstObject;
-        if (!host) return;  // too early, bail out
-        MBMenuBarWindow *w = [MBMenuBarWindow sharedWindow];
-        [w installInHost:host];
-        [w show];
-        [[MBMenuExtraLoader sharedLoader] loadAutoloadedExtras];
+        [MBSpringBoardHooks installMenuBarNow];
     });
 }
 
@@ -89,19 +104,11 @@ static void _installHooks(void) {
         MSHookMessageEx(sbAd, @selector(applicationDidFinishLaunching:),
                         (IMP)hook_SBAppDelegate_didFinishLaunching,
                         (IMP *)&orig_SBAppDelegate_didFinishLaunching);
-    } else {
-        // No suitable launch hook target — install the bar from a runloop
-        // observer instead, so the tweak still comes up.
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)),
-                       dispatch_get_main_queue(), ^{
-            UIWindow *host = [UIApplication sharedApplication].windows.firstObject;
-            if (!host) return;
-            MBMenuBarWindow *w = [MBMenuBarWindow sharedWindow];
-            [w installInHost:host];
-            [w show];
-            [[MBMenuExtraLoader sharedLoader] loadAutoloadedExtras];
-        });
     }
+
+    // Always try to install the bar directly. The launch hook above may never
+    // fire (installed after launch already ran), so don't depend on it.
+    [MBSpringBoardHooks installMenuBarNow];
 }
 
 // MobileSubstrate constructor — runs at load time, the Theos %ctor equivalent.

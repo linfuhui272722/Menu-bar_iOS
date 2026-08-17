@@ -14,12 +14,12 @@
 #   make TOOLCHAIN=/path/iphone SDK=/path/iPhoneOS15.6.sdk
 
 TOOLCHAIN ?= /tmp/ios_toolchain/linux/iphone
-SDK       ?= /tmp/ios_toolchain/sdks/iPhoneOS15.6.sdk
+SDK       ?= /tmp/sdks-master/iPhoneOS15.6.sdk
 
-CL  := $(TOOLCHAIN)/bin/clang
-LD  := $(TOOLCHAIN)/bin/ld
-LDID := $(TOOLCHAIN)/bin/ldid
-LIPO := $(TOOLCHAIN)/bin/lipo
+CL   := clang
+LD   := lld
+LDID := /tmp/ldid-src/ldid
+LIPO := lipo
 
 TARGET     = -target arm64-apple-ios15.6
 SYSROOT    = -isysroot $(SDK)
