@@ -1,0 +1,3 @@
+#!/bin/sh
+# MacBar preinst — nothing to do.
+exit 0

@@ -1,0 +1,35 @@
+#!/bin/sh
+# MacBar postinst.
+#
+# Root-cause note: ElleKit's injector (libinjector/TweakLoader) only scans
+# /var/jb/usr/lib/TweakInject for rootless tweaks (see ellekit injector.c:
+# TWEAKS_DIRECTORY_ROOTLESS). The classic MobileSubstrate path
+# /var/jb/Library/MobileSubstrate/DynamicLibraries is NOT scanned by ElleKit,
+# so the real files are installed under TweakInject. Some jailbreaks still
+# ship a MobileSubstrate-compat layer that scans the classic path, so we keep
+# that path in sync with symlinks pointing at the real files.
+#
+# Remove any stale REAL files left there by older builds of this package
+# (which installed into the classic path), then point the path at our real
+# files. Never abort the install on a failure here.
+set -e
+MSDIR=/var/jb/Library/MobileSubstrate/DynamicLibraries
+REALDIR=/var/jb/usr/lib/TweakInject
+if [ -d "$MSDIR" ]; then
+  for f in MacBar.dylib MacBar.plist MacBar.bundle; do
+    if [ -e "$MSDIR/$f" ] && [ ! -L "$MSDIR/$f" ]; then
+      rm -rf "$MSDIR/$f"
+    fi
+  done
+  if [ -e "$REALDIR/MacBar.dylib" ]; then
+    ln -sf "$REALDIR/MacBar.dylib" "$MSDIR/MacBar.dylib" 2>/dev/null || true
+    ln -sf "$REALDIR/MacBar.plist" "$MSDIR/MacBar.plist" 2>/dev/null || true
+    ln -sfn "$REALDIR/MacBar.bundle" "$MSDIR/MacBar.bundle" 2>/dev/null || true
+  fi
+fi
+
+# Also purge the old version's leftover MacBar.log location under the classic
+# mobile home if present, so we start clean.
+rm -f /var/jb/var/mobile/MacBar.log 2>/dev/null || true
+
+exit 0
