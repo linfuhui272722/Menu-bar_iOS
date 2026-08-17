@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>BuildMachineOSBuild</key>
+	<string>15W4262</string>
+	<key>CFBundleAllowMixedLocalizations</key>
+	<true/>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>English</string>
+	<key>CFBundleExecutable</key>
+	<string>Displays</string>
+	<key>CFBundleGetInfoString</key>
+	<string>3.0, Copyright © 2001-2014 Apple Inc.</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.apple.menuextra.airplay</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>AirPlay Displays Menu</string>
+	<key>CFBundlePackageType</key>
+	<string>BNDL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>3.0</string>
+	<key>CFBundleSignature</key>
+	<string>????</string>
+	<key>CFBundleSupportedPlatforms</key>
+	<array>
+		<string>MacOSX</string>
+	</array>
+	<key>CFBundleVersion</key>
+	<string>74</string>
+	<key>DTCompiler</key>
+	<string>com.apple.compilers.llvm.clang.1_0</string>
+	<key>DTPlatformBuild</key>
+	<string>7A176g</string>
+	<key>DTPlatformVersion</key>
+	<string>GM</string>
+	<key>DTSDKBuild</key>
+	<string>15W4262</string>
+	<key>DTSDKName</key>
+	<string>macosx10.11internal</string>
+	<key>DTXcode</key>
+	<string>0700</string>
+	<key>DTXcodeBuild</key>
+	<string>7A176g</string>
+	<key>NSMenuExtraWidth</key>
+	<integer>25</integer>
+	<key>NSPrincipalClass</key>
+	<string>DisplaysExtra</string>
+</dict>
+</plist>
