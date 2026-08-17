@@ -45,7 +45,8 @@ static NSString *const kSBFrontmostChangedNotification = @"SBFrontmostApplicatio
 // SBMainWorkspace applicationDidActivate: → refresh front-most app menu.
 static void (*orig_SBMainWorkspace_applicationDidActivate)(id, SEL, id);
 static void hook_SBMainWorkspace_applicationDidActivate(id self, SEL _cmd, id app) {
-    orig_SBMainWorkspace_applicationDidActivate(self, _cmd, app);
+    if (orig_SBMainWorkspace_applicationDidActivate)
+        orig_SBMainWorkspace_applicationDidActivate(self, _cmd, app);
     NSString *bid = [app respondsToSelector:@selector(bundleIdentifier)] ? [app bundleIdentifier] : nil;
     NSString *name = [app respondsToSelector:@selector(displayName)] ? [app displayName] : bid;
     [[MBMenuBarView sharedBar] updateFrontmostApplication:bid displayName:name icon:nil];
@@ -54,9 +55,11 @@ static void hook_SBMainWorkspace_applicationDidActivate(id self, SEL _cmd, id ap
 // SpringBoard -applicationDidFinishLaunching: → install the menu bar.
 static void (*orig_SBAppDelegate_didFinishLaunching)(id, SEL, id);
 static void hook_SBAppDelegate_didFinishLaunching(id self, SEL _cmd, id app) {
-    orig_SBAppDelegate_didFinishLaunching(self, _cmd, app);
+    if (orig_SBAppDelegate_didFinishLaunching)
+        orig_SBAppDelegate_didFinishLaunching(self, _cmd, app);
     dispatch_async(dispatch_get_main_queue(), ^{
         UIWindow *host = [UIApplication sharedApplication].windows.firstObject;
+        if (!host) return;  // too early, bail out
         MBMenuBarWindow *w = [MBMenuBarWindow sharedWindow];
         [w installInHost:host];
         [w show];
@@ -65,19 +68,39 @@ static void hook_SBAppDelegate_didFinishLaunching(id self, SEL _cmd, id app) {
 }
 
 static void _installHooks(void) {
+    if (!MSHookMessageEx) return;  // ElleKit not loaded — nothing to do
+
+    // Only hook methods that actually exist on the class; hooking a
+    // non-existent selector makes MSHookMessageEx add the method and leaves
+    // the saved orig as NULL, so the trampoline must guard for that.
     Class mw = MBClassNamed(@"SBMainWorkspace");
-    if (mw && MSHookMessageEx) {
+    if (mw && class_getInstanceMethod(mw, @selector(applicationDidActivate:))) {
         MSHookMessageEx(mw, @selector(applicationDidActivate:),
                         (IMP)hook_SBMainWorkspace_applicationDidActivate,
                         (IMP *)&orig_SBMainWorkspace_applicationDidActivate);
     }
-    // SpringBoard's principal delegate class is SBAppDelegate / SBApplication
+    // SpringBoard's principal delegate class is SBAppDelegate; fall back to
+    // SBApplication (the UIApplication subclass SpringBoard uses). Hooking
+    // UIApplication itself is avoided — it would add a method it shouldn't own.
     Class sbAd = MBClassNamed(@"SBAppDelegate");
-    if (!sbAd) sbAd = MBClassNamed(@"UIApplication");
-    if (sbAd && MSHookMessageEx) {
+    if (!sbAd) sbAd = MBClassNamed(@"SBApplication");
+    if (!sbAd) sbAd = MBClassNamed(@"SpringBoard");
+    if (sbAd && class_getInstanceMethod(sbAd, @selector(applicationDidFinishLaunching:))) {
         MSHookMessageEx(sbAd, @selector(applicationDidFinishLaunching:),
                         (IMP)hook_SBAppDelegate_didFinishLaunching,
                         (IMP *)&orig_SBAppDelegate_didFinishLaunching);
+    } else {
+        // No suitable launch hook target — install the bar from a runloop
+        // observer instead, so the tweak still comes up.
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            UIWindow *host = [UIApplication sharedApplication].windows.firstObject;
+            if (!host) return;
+            MBMenuBarWindow *w = [MBMenuBarWindow sharedWindow];
+            [w installInHost:host];
+            [w show];
+            [[MBMenuExtraLoader sharedLoader] loadAutoloadedExtras];
+        });
     }
 }
 

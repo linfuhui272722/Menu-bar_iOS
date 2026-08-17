@@ -93,7 +93,9 @@ package: $(NAME).dylib
 	cp Resources/zh-Hans.lproj/Localizable.strings _package/$(BUNDLEDIR)/MacBar.bundle/zh-Hans.lproj/
 	@chmod 0755 _package/DEBIAN
 	@printf '#!/bin/sh\nexit 0\n' > _package/DEBIAN/preinst; chmod 0755 _package/DEBIAN/preinst
-	@printf '#!/bin/sh\nif [ -x /var/jb/usr/bin/killall ]; then /var/jb/usr/bin/killall -9 SpringBoard 2>/dev/null; fi\n' > _package/DEBIAN/postinst; chmod 0755 _package/DEBIAN/postinst
+	@printf '#!/bin/sh\n# Let the installer (Sileo/Zebra) handle the respring; doing it here\n# with killall can abort dpkg configuration mid-way.\nexit 0\n' > _package/DEBIAN/postinst; chmod 0755 _package/DEBIAN/postinst
+	@printf '#!/bin/sh\nexit 0\n' > _package/DEBIAN/prerm; chmod 0755 _package/DEBIAN/prerm
+	@printf '#!/bin/sh\nexit 0\n' > _package/DEBIAN/postrm; chmod 0755 _package/DEBIAN/postrm
 	sed -e 's/@ARCH@/iphoneos-arm64/' control_rootless > _package/DEBIAN/control
 	@dpkg-deb -Zxz --root-owner-group -b _package $(NAME)_1.0.0_rootless.deb
 	@echo "Built: $(NAME)_1.0.0_rootless.deb"
