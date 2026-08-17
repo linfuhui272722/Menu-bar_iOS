@@ -21,7 +21,7 @@ LD   := lld
 LDID := /tmp/ldid-src/ldid
 LIPO := lipo
 
-TARGET     = -target arm64e-apple-ios15.6
+TARGET     = -target arm64-apple-ios15.6
 SYSROOT    = -isysroot $(SDK)
 ARC        = -fobjc-arc
 WARN       = -Wno-deprecated-declarations -Wno-unused -Wno-nullability-completeness
@@ -73,10 +73,6 @@ all: $(NAME).dylib
 $(NAME).dylib: $(OBJS)
 	$(CL) $(LDFLAGS) -dynamiclib -install_name $(LIBDIR)/$(NAME).dylib \
 		-o $@ $(OBJS)
-	# lld writes cpusubtype=0 (arm64) even for -target arm64e; patch the
-	# Mach-O header cpusubtype field (offset 8) to 0x2 so the dylib is
-	# accepted as arm64e by dlopen inside arm64e processes (A12+ Dopamine).
-	@python3 patch_arch.py $@
 	$(LDID) -S $@ 2>/dev/null || true
 
 # Resource bundle (.bundle of plists + strings) and the MobileSubstrate filter
@@ -104,7 +100,7 @@ package: $(NAME).dylib
 	cp prerm _package/DEBIAN/prerm; chmod 0755 _package/DEBIAN/prerm
 	cp preinst _package/DEBIAN/preinst; chmod 0755 _package/DEBIAN/preinst
 	cp postrm _package/DEBIAN/postrm; chmod 0755 _package/DEBIAN/postrm
-	sed -e 's/@ARCH@/iphoneos-arm64e/' control_rootless > _package/DEBIAN/control
+	sed -e 's/@ARCH@/iphoneos-arm64/' control_rootless > _package/DEBIAN/control
 	@dpkg-deb -Zxz --root-owner-group -b _package $(NAME)_1.0.0_rootless.deb
 	@echo "Built: $(NAME)_1.0.0_rootless.deb"
 
