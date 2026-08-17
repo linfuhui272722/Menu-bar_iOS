@@ -9,6 +9,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface MBMenuBarWindow : UIWindow
 + (instancetype)sharedWindow;
+- (void)makeVisible;
 - (void)installInHost:(UIWindow *)host;
 - (void)show;
 - (void)hide;
