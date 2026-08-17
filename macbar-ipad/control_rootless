@@ -9,5 +9,5 @@ Description: Ports the macOS desktop menu bar to iPadOS.
  Maintainer: linfuhui272722
 Author: linfuhui272722
 Section: Tweaks
-Depends: ellekit, firmware (>= 15.0)
+Depends: ellekit
 Maintainer: linfuhui272722 <linfuhui272722@users.noreply.github.com>
