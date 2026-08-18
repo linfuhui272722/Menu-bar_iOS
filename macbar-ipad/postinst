@@ -1,97 +1,72 @@
 #!/bin/sh
-# MacBar postinst.
+# MacBar postinst — self-healing + never-fail.
 #
-# Symptom this defends against (confirmed across multiple devices):
-# "Sileo reports install success, no error, but MacBar.dylib / MacBar.plist
-#  do NOT appear in /var/jb/usr/lib/TweakInject/."
-#
-# Root cause: on some Sileo/dpkg rootless setups the package is unpacked with
-# an instdir equal to the jailbreak root (the real path behind the /var/jb
-# symlink) instead of "/". Because our deb already carries the /var/jb prefix
-# (the standard rootless layout, same as Theos), the files then land at
-# <jbroot>/var/jb/usr/lib/TweakInject/... which resolves to
-# /var/jb/var/jb/usr/lib/TweakInject/... — a doubled/nested path — so they are
-# absent from the expected /var/jb/usr/lib/TweakInject/.
-#
-# Fix: locate the real files via `dpkg -L` (which reports paths as dpkg
-# actually unpacked them, nested or not), and force them into the canonical
-# /var/jb/usr/lib/TweakInject/ location. Everything is best-effort and never
-# aborts the install. A diagnostic log is written so we can see what happened.
-set -u
-LOG=/var/jb/var/mobile/MacBar_install.log
-REALDIR=/var/jb/usr/lib/TweakInject
-MSDIR=/var/jb/Library/MobileSubstrate/DynamicLibraries
-PKG=com.linfunui.macbar
+# Observed on device: dpkg unpacks the files into /var/jb/usr/lib/TweakInject/
+# correctly (the install log proves it), but by the time the user checks,
+# the files are gone. The most likely cause is Sileo rolling back the whole
+# install when postinst does not exit 0 cleanly (a failed/half-aborted
+# postinst makes Sileo undo the unpack). So this script is deliberately
+# defensive: no `set -e`/`set -u`, every destructive/external call guarded,
+# and it always exits 0. It also writes a final snapshot so we can tell
+# whether the files survived postinst itself.
+LOG=${MB_LOG:-/var/jb/var/mobile/MacBar_install.log}
+REALDIR=${MB_REALDIR:-/var/jb/usr/lib/TweakInject}
+MSDIR=${MB_MSDIR:-/var/jb/Library/MobileSubstrate/DynamicLibraries}
+PKG=${MB_PKG:-com.linfunui.macbar}
+
 mkdir -p "$(dirname "$LOG")" 2>/dev/null || true
+
 {
   echo "==== postinst $(date) ===="
-  echo "instdir guess: ${DPKG_ROOT:-}"
-  echo "argv: $0 $@"
+  echo "argv: $0 $*"
+  echo "DPKG_ROOT=${DPKG_ROOT:-}"
+  echo "/var/jb -> $(readlink /var/jb 2>/dev/null || echo 'not a symlink')"
   echo "--- dpkg -L $PKG ---"
   dpkg -L "$PKG" 2>&1
 } > "$LOG" 2>&1
 
-# Find where dpkg actually placed each artifact (handles nested instdir).
-find_pkg_file() {
-  # $1 = basename; prints the real path dpkg recorded, or empty
-  dpkg -L "$PKG" 2>/dev/null | while read -r p; do
-    case "$p" in
-      */"$1") printf '%s\n' "$p"; return 0;;
-    esac
-  done
-}
-
-DYLIB_SRC=$(dpkg -L "$PKG" 2>/dev/null | grep -E '/MacBar\.dylib$' | head -n1)
-PLIST_SRC=$(dpkg -L "$PKG" 2>/dev/null | grep -E '/MacBar\.plist$' | head -n1)
-BUNDLE_SRC=$(dpkg -L "$PKG" 2>/dev/null | grep -E '/MacBar\.bundle$' | head -n1)
+# Locate where dpkg actually placed each artifact (handles nested instdir).
+DYLIB_SRC=$(dpkg -L "$PKG" 2>/dev/null | grep -E '/MacBar\.dylib$' | head -n1 || true)
+PLIST_SRC=$(dpkg -L "$PKG" 2>/dev/null | grep -E '/MacBar\.plist$' | head -n1 || true)
+BUNDLE_SRC=$(dpkg -L "$PKG" 2>/dev/null | grep -E '/MacBar\.bundle$' | head -n1 || true)
 
 {
-  echo "dylib_src=$DYLIB_SRC"
-  echo "plist_src=$PLIST_SRC"
-  echo "bundle_src=$BUNDLE_SRC"
+  echo "dylib_src=${DYLIB_SRC:-}"
+  echo "plist_src=${PLIST_SRC:-}"
+  echo "bundle_src=${BUNDLE_SRC:-}"
 } >> "$LOG" 2>&1
 
 mkdir -p "$REALDIR" 2>/dev/null || true
 
-# Relocate the dylib.
+# Relocate dylib.
 if [ -n "$DYLIB_SRC" ] && [ -f "$DYLIB_SRC" ]; then
-  if [ "$DYLIB_SRC" != "$REALDIR/MacBar.dylib" ]; then
-    cp -f "$DYLIB_SRC" "$REALDIR/MacBar.dylib" 2>>"$LOG" && echo "relocated dylib -> $REALDIR" >>"$LOG"
-  fi
+  [ "$DYLIB_SRC" != "$REALDIR/MacBar.dylib" ] && { cp -f "$DYLIB_SRC" "$REALDIR/MacBar.dylib" 2>>"$LOG" || true; echo "relocated dylib" >>"$LOG" 2>&1; }
 else
-  echo "WARNING: MacBar.dylib not found in dpkg -L" >> "$LOG"
+  echo "WARNING: MacBar.dylib not in dpkg -L" >> "$LOG" 2>&1
 fi
 
-# Relocate the filter plist.
+# Relocate plist.
 if [ -n "$PLIST_SRC" ] && [ -f "$PLIST_SRC" ]; then
-  if [ "$PLIST_SRC" != "$REALDIR/MacBar.plist" ]; then
-    cp -f "$PLIST_SRC" "$REALDIR/MacBar.plist" 2>>"$LOG" && echo "relocated plist -> $REALDIR" >>"$LOG"
-  fi
+  [ "$PLIST_SRC" != "$REALDIR/MacBar.plist" ] && { cp -f "$PLIST_SRC" "$REALDIR/MacBar.plist" 2>>"$LOG" || true; echo "relocated plist" >>"$LOG" 2>&1; }
 else
-  echo "WARNING: MacBar.plist not found in dpkg -L" >> "$LOG"
+  echo "WARNING: MacBar.plist not in dpkg -L" >> "$LOG" 2>&1
 fi
 
-# Relocate the resource bundle.
+# Relocate bundle.
 if [ -n "$BUNDLE_SRC" ] && [ -d "$BUNDLE_SRC" ]; then
   if [ "$BUNDLE_SRC" != "$REALDIR/MacBar.bundle" ]; then
     rm -rf "$REALDIR/MacBar.bundle" 2>>"$LOG" || true
-    cp -Rf "$BUNDLE_SRC" "$REALDIR/MacBar.bundle" 2>>"$LOG" && echo "relocated bundle -> $REALDIR" >>"$LOG"
+    cp -Rf "$BUNDLE_SRC" "$REALDIR/MacBar.bundle" 2>>"$LOG" || true
+    echo "relocated bundle" >>"$LOG" 2>&1
   fi
 else
-  echo "WARNING: MacBar.bundle not found in dpkg -L" >> "$LOG"
+  echo "WARNING: MacBar.bundle not in dpkg -L" >> "$LOG" 2>&1
 fi
 
-{
-  echo "--- final listing of $REALDIR ---"
-  ls -l "$REALDIR" 2>&1
-} >> "$LOG" 2>&1
-
-# Classic MobileSubstrate path compat symlinks (some jailbreaks scan it).
+# Classic MobileSubstrate path compat symlinks.
 if [ -d "$MSDIR" ]; then
   for f in MacBar.dylib MacBar.plist MacBar.bundle; do
-    if [ -e "$MSDIR/$f" ] && [ ! -L "$MSDIR/$f" ]; then
-      rm -rf "$MSDIR/$f" 2>/dev/null || true
-    fi
+    [ -e "$MSDIR/$f" ] && [ ! -L "$MSDIR/$f" ] && { rm -rf "$MSDIR/$f" 2>/dev/null || true; }
   done
   if [ -e "$REALDIR/MacBar.dylib" ]; then
     ln -sf "$REALDIR/MacBar.dylib" "$MSDIR/MacBar.dylib" 2>/dev/null || true
@@ -100,9 +75,16 @@ if [ -d "$MSDIR" ]; then
   fi
 fi
 
-# Start each install with a fresh runtime log so absence after respring is
-# meaningful (a missing MacBar.log after this point = constructor never ran =
-# dylib was not loaded into SpringBoard).
 rm -f /var/jb/var/mobile/MacBar.log 2>/dev/null || true
+
+# Final snapshot: do the files survive postinst itself?
+{
+  echo "--- post-postinst snapshot of $REALDIR ---"
+  ls -l "$REALDIR" 2>&1
+  echo "dylib exists: $([ -f "$REALDIR/MacBar.dylib" ] && echo YES || echo NO)"
+  echo "plist exists: $([ -f "$REALDIR/MacBar.plist" ] && echo YES || echo NO)"
+  echo "bundle exists: $([ -d "$REALDIR/MacBar.bundle" ] && echo YES || echo NO)"
+  echo "==== postinst done, exiting 0 ===="
+} >> "$LOG" 2>&1
 
 exit 0
