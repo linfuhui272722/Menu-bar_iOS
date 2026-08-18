@@ -1,75 +1,92 @@
 #!/bin/sh
-# MacBar postinst — self-healing, never-fail, find-based relocation.
+# MacBar postinst — extract files directly from the .deb, bypassing the
+# broken dpkg unpack on this Sileo rootless setup.
 #
-# Root cause of "files not in /var/jb/usr/lib/TweakInject": on this Sileo/dpkg
-# rootless setup, dpkg unpacks with an instdir equal to the jailbreak root
-# (the real path behind /var/jb) instead of "/". Because the deb already
-# carries the /var/jb prefix, files land at <jbroot>/var/jb/... which resolves
-# to /var/jb/var/jb/... (nested). dpkg -L reports the LOGICAL path
-# (/var/jb/usr/lib/TweakInject/MacBar.dylib) but the file is NOT there, so a
-# naive `[ -f "$(dpkg -L ...)" ]` check fails and the self-heal copy never
-# runs. Fix: use `find` to locate the file's REAL on-disk path (nested or
-# not), then force-copy into the canonical location.
+# Proven on device (install log): dpkg records the files in its database
+# (dpkg -L lists /var/jb/usr/lib/TweakInject/MacBar.dylib etc.) but NEVER
+# writes them to disk — a recursive find across the entire jailbreak root
+# returns NOTFOUND, and the TweakInject dir shows every other tweak present
+# except MacBar. So the deb's data.tar is never unpacked onto the filesystem;
+# relying on dpkg to place the files is hopeless.
+#
+# Fix: locate the .deb itself (Sileo caches it under the jbroot apt archives,
+# or the user downloaded it), unpack its data.tar to a temp dir with
+# dpkg-deb -x, then copy MacBar.dylib / MacBar.plist / MacBar.bundle into
+# /var/jb/usr/lib/TweakInject/. Falls back to a whole-filesystem find.
 LOG=${MB_LOG:-/var/jb/var/mobile/MacBar_install.log}
 REALDIR=${MB_REALDIR:-/var/jb/usr/lib/TweakInject}
 MSDIR=${MB_MSDIR:-/var/jb/Library/MobileSubstrate/DynamicLibraries}
 PKG=${MB_PKG:-com.linfunui.macbar}
 
 mkdir -p "$(dirname "$LOG")" 2>/dev/null || true
+TMP=$(mktemp -d 2>/dev/null || echo /tmp/macbar.$$) || TMP=/tmp/macbar.$$
+mkdir -p "$TMP" 2>/dev/null || true
 
-JBROOT=$(readlink /var/jb 2>/dev/null || echo "/var/jb")
 {
   echo "==== postinst $(date) ===="
   echo "argv: $0 $*"
-  echo "DPKG_ROOT=${DPKG_ROOT:-}"
-  echo "/var/jb -> ${JBROOT}"
-  echo "dpkg admindir: $(ls -d /var/jb/Library/dpkg 2>/dev/null)"
+  echo "/var/jb -> $(readlink /var/jb 2>/dev/null || echo 'not a symlink')"
   echo "--- dpkg -L $PKG ---"
   dpkg -L "$PKG" 2>&1
 } > "$LOG" 2>&1
 
-# Search the whole jailbreak root for the real on-disk location of each
-# artifact. This finds files even when they were unpacked into a nested
-# <jbroot>/var/jb/... path.
-find_real() {
-  # $1 = basename, $2 = -f (file) or -d (dir)
-  find "${JBROOT}" -name "$1" $2 2>/dev/null | head -n1
-}
+# 1) Try to locate the .deb file: Sileo apt cache, then a whole-FS search.
+DEB=""
+for c in \
+  "/var/jb/var/cache/apt/archives/${PKG}_1.0.0_iphoneos-arm64.deb" \
+  "/var/jb/var/cache/apt/archives/${PKG}_1.0.0_arm64.deb" \
+  "/var/jb/var/cache/apt/archives/${PKG}*.deb"; do
+  for f in $c; do
+    [ -f "$f" ] && DEB="$f" && break
+  done
+  [ -n "$DEB" ] && break
+done
+if [ -z "$DEB" ]; then
+  DEB=$(find / -name "MacBar_1.0.0_rootless.deb" -o -name "${PKG}_1.0.0*.deb" 2>/dev/null | head -n1)
+fi
+echo "deb located: ${DEB:-NOTFOUND}" >>"$LOG" 2>&1
 
-DYLIB_REAL=$(find_real MacBar.dylib -type f)
-PLIST_REAL=$(find_real MacBar.plist -type f)
-BUNDLE_REAL=$(find_real MacBar.bundle -type d)
+# 2) Unpack the deb's data.tar to a temp dir.
+EXTRACTED=""
+if [ -n "$DEB" ] && [ -f "$DEB" ]; then
+  if dpkg-deb -x "$DEB" "$TMP" 2>>"$LOG"; then
+    EXTRACTED="$TMP"
+    echo "extracted deb to $TMP" >>"$LOG" 2>&1
+    echo "--- extracted tree (MacBar files) ---" >>"$LOG" 2>&1
+    find "$TMP" -name "MacBar.*" 2>/dev/null >>"$LOG" 2>&1
+  else
+    echo "dpkg-deb -x failed" >>"$LOG" 2>&1
+  fi
+fi
 
-{
-  echo "dylib_real=${DYLIB_REAL:-NOTFOUND}"
-  echo "plist_real=${PLIST_REAL:-NOTFOUND}"
-  echo "bundle_real=${BUNDLE_REAL:-NOTFOUND}"
-} >> "$LOG" 2>&1
+# 3) Resolve the extracted path (deb carries ./var/jb/usr/lib/TweakInject/).
+SRC="$TMP/var/jb/usr/lib/TweakInject"
+[ -d "$SRC" ] || SRC=$(find "$TMP" -type d -name TweakInject 2>/dev/null | head -n1)
 
 mkdir -p "$REALDIR" 2>/dev/null || true
 
-# Force each artifact into the canonical TweakInject path.
-if [ -n "$DYLIB_REAL" ] && [ -f "$DYLIB_REAL" ]; then
-  cp -f "$DYLIB_REAL" "$REALDIR/MacBar.dylib" 2>>"$LOG" || true
+if [ -n "$SRC" ] && [ -d "$SRC" ]; then
+  cp -f "$SRC/MacBar.dylib" "$REALDIR/MacBar.dylib" 2>>"$LOG" || true
   chmod 0755 "$REALDIR/MacBar.dylib" 2>/dev/null || true
-  echo "placed dylib (from $DYLIB_REAL)" >>"$LOG" 2>&1
-else
-  echo "WARNING: MacBar.dylib not found anywhere under $JBROOT" >> "$LOG" 2>&1
-fi
-
-if [ -n "$PLIST_REAL" ] && [ -f "$PLIST_REAL" ]; then
-  cp -f "$PLIST_REAL" "$REALDIR/MacBar.plist" 2>>"$LOG" || true
-  echo "placed plist (from $PLIST_REAL)" >>"$LOG" 2>&1
-else
-  echo "WARNING: MacBar.plist not found anywhere under $JBROOT" >> "$LOG" 2>&1
-fi
-
-if [ -n "$BUNDLE_REAL" ] && [ -d "$BUNDLE_REAL" ]; then
+  cp -f "$SRC/MacBar.plist" "$REALDIR/MacBar.plist" 2>>"$LOG" || true
   rm -rf "$REALDIR/MacBar.bundle" 2>>"$LOG" || true
-  cp -Rf "$BUNDLE_REAL" "$REALDIR/MacBar.bundle" 2>>"$LOG" || true
-  echo "placed bundle (from $BUNDLE_REAL)" >>"$LOG" 2>&1
+  cp -Rf "$SRC/MacBar.bundle" "$REALDIR/MacBar.bundle" 2>>"$LOG" || true
+  echo "placed files from extracted deb ($SRC)" >>"$LOG" 2>&1
 else
-  echo "WARNING: MacBar.bundle not found anywhere under $JBROOT" >> "$LOG" 2>&1
+  echo "WARNING: no TweakInject in extracted deb; trying FS find" >>"$LOG" 2>&1
+  # 4) Fallback: whole-FS find for already-unpacked files.
+  DYLIB_REAL=$(find / -name MacBar.dylib -type f 2>/dev/null | head -n1)
+  PLIST_REAL=$(find / -name MacBar.plist -type f 2>/dev/null | head -n1)
+  BUNDLE_REAL=$(find / -name MacBar.bundle -type d 2>/dev/null | head -n1)
+  echo "fs dylib=${DYLIB_REAL:-NOTFOUND}" >>"$LOG" 2>&1
+  echo "fs plist=${PLIST_REAL:-NOTFOUND}" >>"$LOG" 2>&1
+  echo "fs bundle=${BUNDLE_REAL:-NOTFOUND}" >>"$LOG" 2>&1
+  [ -n "$DYLIB_REAL" ] && { cp -f "$DYLIB_REAL" "$REALDIR/MacBar.dylib" 2>>"$LOG" || true; chmod 0755 "$REALDIR/MacBar.dylib" 2>/dev/null || true; }
+  [ -n "$PLIST_REAL" ] && cp -f "$PLIST_REAL" "$REALDIR/MacBar.plist" 2>>"$LOG" || true
+  if [ -n "$BUNDLE_REAL" ]; then
+    rm -rf "$REALDIR/MacBar.bundle" 2>>"$LOG" || true
+    cp -Rf "$BUNDLE_REAL" "$REALDIR/MacBar.bundle" 2>>"$LOG" || true
+  fi
 fi
 
 # Classic MobileSubstrate path compat symlinks.
@@ -85,8 +102,8 @@ if [ -d "$MSDIR" ]; then
 fi
 
 rm -f /var/jb/var/mobile/MacBar.log 2>/dev/null || true
+rm -rf "$TMP" 2>/dev/null || true
 
-# Final snapshot.
 {
   echo "--- post-postinst snapshot of $REALDIR ---"
   ls -l "$REALDIR" 2>&1
