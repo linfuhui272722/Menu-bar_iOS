@@ -1,24 +1,96 @@
 #!/bin/sh
 # MacBar postinst.
 #
-# Root-cause note: ElleKit's injector (libinjector/TweakLoader) only scans
-# /var/jb/usr/lib/TweakInject for rootless tweaks (see ellekit injector.c:
-# TWEAKS_DIRECTORY_ROOTLESS). The classic MobileSubstrate path
-# /var/jb/Library/MobileSubstrate/DynamicLibraries is NOT scanned by ElleKit,
-# so the real files are installed under TweakInject. Some jailbreaks still
-# ship a MobileSubstrate-compat layer that scans the classic path, so we keep
-# that path in sync with symlinks pointing at the real files.
+# Symptom this defends against (confirmed across multiple devices):
+# "Sileo reports install success, no error, but MacBar.dylib / MacBar.plist
+#  do NOT appear in /var/jb/usr/lib/TweakInject/."
 #
-# Remove any stale REAL files left there by older builds of this package
-# (which installed into the classic path), then point the path at our real
-# files. Never abort the install on a failure here.
-set -e
-MSDIR=/var/jb/Library/MobileSubstrate/DynamicLibraries
+# Root cause: on some Sileo/dpkg rootless setups the package is unpacked with
+# an instdir equal to the jailbreak root (the real path behind the /var/jb
+# symlink) instead of "/". Because our deb already carries the /var/jb prefix
+# (the standard rootless layout, same as Theos), the files then land at
+# <jbroot>/var/jb/usr/lib/TweakInject/... which resolves to
+# /var/jb/var/jb/usr/lib/TweakInject/... — a doubled/nested path — so they are
+# absent from the expected /var/jb/usr/lib/TweakInject/.
+#
+# Fix: locate the real files via `dpkg -L` (which reports paths as dpkg
+# actually unpacked them, nested or not), and force them into the canonical
+# /var/jb/usr/lib/TweakInject/ location. Everything is best-effort and never
+# aborts the install. A diagnostic log is written so we can see what happened.
+set -u
+LOG=/var/jb/var/mobile/MacBar_install.log
 REALDIR=/var/jb/usr/lib/TweakInject
+MSDIR=/var/jb/Library/MobileSubstrate/DynamicLibraries
+PKG=com.linfunui.macbar
+mkdir -p "$(dirname "$LOG")" 2>/dev/null || true
+{
+  echo "==== postinst $(date) ===="
+  echo "instdir guess: ${DPKG_ROOT:-}"
+  echo "argv: $0 $@"
+  echo "--- dpkg -L $PKG ---"
+  dpkg -L "$PKG" 2>&1
+} > "$LOG" 2>&1
+
+# Find where dpkg actually placed each artifact (handles nested instdir).
+find_pkg_file() {
+  # $1 = basename; prints the real path dpkg recorded, or empty
+  dpkg -L "$PKG" 2>/dev/null | while read -r p; do
+    case "$p" in
+      */"$1") printf '%s\n' "$p"; return 0;;
+    esac
+  done
+}
+
+DYLIB_SRC=$(dpkg -L "$PKG" 2>/dev/null | grep -E '/MacBar\.dylib$' | head -n1)
+PLIST_SRC=$(dpkg -L "$PKG" 2>/dev/null | grep -E '/MacBar\.plist$' | head -n1)
+BUNDLE_SRC=$(dpkg -L "$PKG" 2>/dev/null | grep -E '/MacBar\.bundle$' | head -n1)
+
+{
+  echo "dylib_src=$DYLIB_SRC"
+  echo "plist_src=$PLIST_SRC"
+  echo "bundle_src=$BUNDLE_SRC"
+} >> "$LOG" 2>&1
+
+mkdir -p "$REALDIR" 2>/dev/null || true
+
+# Relocate the dylib.
+if [ -n "$DYLIB_SRC" ] && [ -f "$DYLIB_SRC" ]; then
+  if [ "$DYLIB_SRC" != "$REALDIR/MacBar.dylib" ]; then
+    cp -f "$DYLIB_SRC" "$REALDIR/MacBar.dylib" 2>>"$LOG" && echo "relocated dylib -> $REALDIR" >>"$LOG"
+  fi
+else
+  echo "WARNING: MacBar.dylib not found in dpkg -L" >> "$LOG"
+fi
+
+# Relocate the filter plist.
+if [ -n "$PLIST_SRC" ] && [ -f "$PLIST_SRC" ]; then
+  if [ "$PLIST_SRC" != "$REALDIR/MacBar.plist" ]; then
+    cp -f "$PLIST_SRC" "$REALDIR/MacBar.plist" 2>>"$LOG" && echo "relocated plist -> $REALDIR" >>"$LOG"
+  fi
+else
+  echo "WARNING: MacBar.plist not found in dpkg -L" >> "$LOG"
+fi
+
+# Relocate the resource bundle.
+if [ -n "$BUNDLE_SRC" ] && [ -d "$BUNDLE_SRC" ]; then
+  if [ "$BUNDLE_SRC" != "$REALDIR/MacBar.bundle" ]; then
+    rm -rf "$REALDIR/MacBar.bundle" 2>>"$LOG" || true
+    cp -Rf "$BUNDLE_SRC" "$REALDIR/MacBar.bundle" 2>>"$LOG" && echo "relocated bundle -> $REALDIR" >>"$LOG"
+  fi
+else
+  echo "WARNING: MacBar.bundle not found in dpkg -L" >> "$LOG"
+fi
+
+{
+  echo "--- final listing of $REALDIR ---"
+  ls -l "$REALDIR" 2>&1
+} >> "$LOG" 2>&1
+
+# Classic MobileSubstrate path compat symlinks (some jailbreaks scan it).
 if [ -d "$MSDIR" ]; then
   for f in MacBar.dylib MacBar.plist MacBar.bundle; do
     if [ -e "$MSDIR/$f" ] && [ ! -L "$MSDIR/$f" ]; then
-      rm -rf "$MSDIR/$f"
+      rm -rf "$MSDIR/$f" 2>/dev/null || true
     fi
   done
   if [ -e "$REALDIR/MacBar.dylib" ]; then
@@ -28,8 +100,9 @@ if [ -d "$MSDIR" ]; then
   fi
 fi
 
-# Also purge the old version's leftover MacBar.log location under the classic
-# mobile home if present, so we start clean.
+# Start each install with a fresh runtime log so absence after respring is
+# meaningful (a missing MacBar.log after this point = constructor never ran =
+# dylib was not loaded into SpringBoard).
 rm -f /var/jb/var/mobile/MacBar.log 2>/dev/null || true
 
 exit 0
