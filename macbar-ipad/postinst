@@ -1,14 +1,15 @@
 #!/bin/sh
-# MacBar postinst — self-healing + never-fail.
+# MacBar postinst — self-healing, never-fail, find-based relocation.
 #
-# Observed on device: dpkg unpacks the files into /var/jb/usr/lib/TweakInject/
-# correctly (the install log proves it), but by the time the user checks,
-# the files are gone. The most likely cause is Sileo rolling back the whole
-# install when postinst does not exit 0 cleanly (a failed/half-aborted
-# postinst makes Sileo undo the unpack). So this script is deliberately
-# defensive: no `set -e`/`set -u`, every destructive/external call guarded,
-# and it always exits 0. It also writes a final snapshot so we can tell
-# whether the files survived postinst itself.
+# Root cause of "files not in /var/jb/usr/lib/TweakInject": on this Sileo/dpkg
+# rootless setup, dpkg unpacks with an instdir equal to the jailbreak root
+# (the real path behind /var/jb) instead of "/". Because the deb already
+# carries the /var/jb prefix, files land at <jbroot>/var/jb/... which resolves
+# to /var/jb/var/jb/... (nested). dpkg -L reports the LOGICAL path
+# (/var/jb/usr/lib/TweakInject/MacBar.dylib) but the file is NOT there, so a
+# naive `[ -f "$(dpkg -L ...)" ]` check fails and the self-heal copy never
+# runs. Fix: use `find` to locate the file's REAL on-disk path (nested or
+# not), then force-copy into the canonical location.
 LOG=${MB_LOG:-/var/jb/var/mobile/MacBar_install.log}
 REALDIR=${MB_REALDIR:-/var/jb/usr/lib/TweakInject}
 MSDIR=${MB_MSDIR:-/var/jb/Library/MobileSubstrate/DynamicLibraries}
@@ -16,51 +17,59 @@ PKG=${MB_PKG:-com.linfunui.macbar}
 
 mkdir -p "$(dirname "$LOG")" 2>/dev/null || true
 
+JBROOT=$(readlink /var/jb 2>/dev/null || echo "/var/jb")
 {
   echo "==== postinst $(date) ===="
   echo "argv: $0 $*"
   echo "DPKG_ROOT=${DPKG_ROOT:-}"
-  echo "/var/jb -> $(readlink /var/jb 2>/dev/null || echo 'not a symlink')"
+  echo "/var/jb -> ${JBROOT}"
+  echo "dpkg admindir: $(ls -d /var/jb/Library/dpkg 2>/dev/null)"
   echo "--- dpkg -L $PKG ---"
   dpkg -L "$PKG" 2>&1
 } > "$LOG" 2>&1
 
-# Locate where dpkg actually placed each artifact (handles nested instdir).
-DYLIB_SRC=$(dpkg -L "$PKG" 2>/dev/null | grep -E '/MacBar\.dylib$' | head -n1 || true)
-PLIST_SRC=$(dpkg -L "$PKG" 2>/dev/null | grep -E '/MacBar\.plist$' | head -n1 || true)
-BUNDLE_SRC=$(dpkg -L "$PKG" 2>/dev/null | grep -E '/MacBar\.bundle$' | head -n1 || true)
+# Search the whole jailbreak root for the real on-disk location of each
+# artifact. This finds files even when they were unpacked into a nested
+# <jbroot>/var/jb/... path.
+find_real() {
+  # $1 = basename, $2 = -f (file) or -d (dir)
+  find "${JBROOT}" -name "$1" $2 2>/dev/null | head -n1
+}
+
+DYLIB_REAL=$(find_real MacBar.dylib -type f)
+PLIST_REAL=$(find_real MacBar.plist -type f)
+BUNDLE_REAL=$(find_real MacBar.bundle -type d)
 
 {
-  echo "dylib_src=${DYLIB_SRC:-}"
-  echo "plist_src=${PLIST_SRC:-}"
-  echo "bundle_src=${BUNDLE_SRC:-}"
+  echo "dylib_real=${DYLIB_REAL:-NOTFOUND}"
+  echo "plist_real=${PLIST_REAL:-NOTFOUND}"
+  echo "bundle_real=${BUNDLE_REAL:-NOTFOUND}"
 } >> "$LOG" 2>&1
 
 mkdir -p "$REALDIR" 2>/dev/null || true
 
-# Relocate dylib.
-if [ -n "$DYLIB_SRC" ] && [ -f "$DYLIB_SRC" ]; then
-  [ "$DYLIB_SRC" != "$REALDIR/MacBar.dylib" ] && { cp -f "$DYLIB_SRC" "$REALDIR/MacBar.dylib" 2>>"$LOG" || true; echo "relocated dylib" >>"$LOG" 2>&1; }
+# Force each artifact into the canonical TweakInject path.
+if [ -n "$DYLIB_REAL" ] && [ -f "$DYLIB_REAL" ]; then
+  cp -f "$DYLIB_REAL" "$REALDIR/MacBar.dylib" 2>>"$LOG" || true
+  chmod 0755 "$REALDIR/MacBar.dylib" 2>/dev/null || true
+  echo "placed dylib (from $DYLIB_REAL)" >>"$LOG" 2>&1
 else
-  echo "WARNING: MacBar.dylib not in dpkg -L" >> "$LOG" 2>&1
+  echo "WARNING: MacBar.dylib not found anywhere under $JBROOT" >> "$LOG" 2>&1
 fi
 
-# Relocate plist.
-if [ -n "$PLIST_SRC" ] && [ -f "$PLIST_SRC" ]; then
-  [ "$PLIST_SRC" != "$REALDIR/MacBar.plist" ] && { cp -f "$PLIST_SRC" "$REALDIR/MacBar.plist" 2>>"$LOG" || true; echo "relocated plist" >>"$LOG" 2>&1; }
+if [ -n "$PLIST_REAL" ] && [ -f "$PLIST_REAL" ]; then
+  cp -f "$PLIST_REAL" "$REALDIR/MacBar.plist" 2>>"$LOG" || true
+  echo "placed plist (from $PLIST_REAL)" >>"$LOG" 2>&1
 else
-  echo "WARNING: MacBar.plist not in dpkg -L" >> "$LOG" 2>&1
+  echo "WARNING: MacBar.plist not found anywhere under $JBROOT" >> "$LOG" 2>&1
 fi
 
-# Relocate bundle.
-if [ -n "$BUNDLE_SRC" ] && [ -d "$BUNDLE_SRC" ]; then
-  if [ "$BUNDLE_SRC" != "$REALDIR/MacBar.bundle" ]; then
-    rm -rf "$REALDIR/MacBar.bundle" 2>>"$LOG" || true
-    cp -Rf "$BUNDLE_SRC" "$REALDIR/MacBar.bundle" 2>>"$LOG" || true
-    echo "relocated bundle" >>"$LOG" 2>&1
-  fi
+if [ -n "$BUNDLE_REAL" ] && [ -d "$BUNDLE_REAL" ]; then
+  rm -rf "$REALDIR/MacBar.bundle" 2>>"$LOG" || true
+  cp -Rf "$BUNDLE_REAL" "$REALDIR/MacBar.bundle" 2>>"$LOG" || true
+  echo "placed bundle (from $BUNDLE_REAL)" >>"$LOG" 2>&1
 else
-  echo "WARNING: MacBar.bundle not in dpkg -L" >> "$LOG" 2>&1
+  echo "WARNING: MacBar.bundle not found anywhere under $JBROOT" >> "$LOG" 2>&1
 fi
 
 # Classic MobileSubstrate path compat symlinks.
@@ -77,7 +86,7 @@ fi
 
 rm -f /var/jb/var/mobile/MacBar.log 2>/dev/null || true
 
-# Final snapshot: do the files survive postinst itself?
+# Final snapshot.
 {
   echo "--- post-postinst snapshot of $REALDIR ---"
   ls -l "$REALDIR" 2>&1
